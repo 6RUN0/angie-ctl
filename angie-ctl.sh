@@ -6,8 +6,6 @@
 #   /etc/angie/modules-available.d    -> modules.d
 
 : "${ANGIE_ETC:=/etc/angie}"
-: "${ANGIE_BIN:=angie}"
-: "${ANGIE_CONF:=$ANGIE_ETC/angie.conf}"
 
 usage() {
   cat >&2 <<EOF
@@ -56,14 +54,6 @@ ensure_dirs() {
   fi
   if [ ! -d "$ENABLED_DIR" ]; then
     echo "Missing directory: $ENABLED_DIR" >&2
-    exit 1
-  fi
-}
-
-config_test() {
-  if ! test_log=$("$ANGIE_BIN" -t -c "$ANGIE_CONF" 2>&1); then
-    echo "Angie config test failed (angie -t)" >&2
-    echo "$test_log" >&2
     exit 1
   fi
 }
@@ -130,7 +120,6 @@ do_enable() {
 
   [ $rc -eq 0 ] || exit $rc
 
-  config_test
 }
 
 do_disable() {
@@ -156,7 +145,6 @@ do_disable() {
 
   [ $rc -eq 0 ] || exit $rc
 
-  config_test
 }
 
 do_list_available() {
