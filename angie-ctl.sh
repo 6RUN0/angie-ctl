@@ -61,8 +61,9 @@ ensure_dirs() {
 }
 
 config_test() {
-  if ! "$ANGIE_BIN" -t -c "$ANGIE_CONF"; then
+  if ! test_log=$("$ANGIE_BIN" -t -c "$ANGIE_CONF" 2>&1); then
     echo "Angie config test failed (angie -t)" >&2
+    echo "$test_log" >&2
     exit 1
   fi
 }
