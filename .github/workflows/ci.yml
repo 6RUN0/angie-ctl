@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint and hermetic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run the CI gate (shellcheck + hermetic suite)
+        run: make check
+
+  container:
+    name: Container integration test (real angie -t)
+    runs-on: ubuntu-latest
+    # Non-blocking: the official image lives on an external registry, so a
+    # registry outage or rate limit must not fail the whole pipeline.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Pull the Angie image
+        run: docker pull docker.angie.software/angie:latest
+      - name: Run the container integration test
+        run: make test-container

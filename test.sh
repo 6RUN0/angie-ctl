@@ -203,6 +203,92 @@ make_stub 1
 assert_status 0 "dry-run never runs the config test" \
   env ANGIE_ETC="$ROOT" ANGIE_BIN="$ROOT/bin/angie" "$CTL" --dry-run httpconf en drupal
 
+# --- status --------------------------------------------------------------
+
+setup_tree
+assert_status 1 "status of a disabled config is non-zero" ctl httpconf status drupal
+assert_contains "status prints the off marker" "[off] drupal.conf" ctl httpconf status drupal
+ctl httpconf en drupal >/dev/null 2>&1
+assert_status 0 "status of an enabled config is zero" ctl httpconf status drupal
+assert_contains "status prints the on marker" "[on ] drupal.conf" ctl httpconf status drupal
+printf 'cfg\n' >"$ROOT/http-conf-available.d/other.conf"
+assert_status 1 "status is non-zero if any name is disabled" ctl httpconf status drupal other
+assert_status 1 "status rejects an invalid name" ctl httpconf status ../escape
+
+# --- prune ---------------------------------------------------------------
+
+setup_tree
+# An orphan: an enabled symlink whose source no longer exists in available.
+ln -s ../http-conf-available.d/ghost.conf "$ROOT/http-conf.d/ghost.conf"
+assert_contains "ls marks the orphan" "[orphan] ghost.conf" ctl httpconf ls
+assert_contains "prune dry-run announces the orphan" "would prune" ctl -n httpconf prune
+assert_exists "dry-run prune keeps the orphan" "$ROOT/http-conf.d/ghost.conf"
+assert_status 0 "prune removes the orphan" ctl httpconf prune
+assert_absent "orphan gone after prune" "$ROOT/http-conf.d/ghost.conf"
+assert_status 1 "prune rejects positional names" ctl httpconf prune ghost
+
+setup_tree
+assert_status 0 "prune with no orphans is a no-op" ctl httpconf prune
+
+# Safety: an orphaned *real* file (not a symlink) must never be deleted.
+setup_tree
+printf 'real\n' >"$ROOT/http-conf.d/real-orphan.conf"
+assert_status 0 "prune skips a non-symlink orphan" ctl httpconf prune
+assert_exists "prune leaves a real orphan file untouched" "$ROOT/http-conf.d/real-orphan.conf"
+
+# --- reload (--reload) ---------------------------------------------------
+
+# A reload stub that records its invocation by creating a marker file. An
+# absolute ANGIE_RELOAD_CMD bypasses the fixed reload PATH, like ANGIE_BIN.
+make_reload_stub() {
+  mkdir -p "$ROOT/bin"
+  printf '#!/bin/sh\n: >"%s/reloaded"\n' "$ROOT" >"$ROOT/bin/reloadcmd"
+  chmod +x "$ROOT/bin/reloadcmd"
+}
+
+setup_tree
+make_reload_stub
+assert_status 0 "reload runs after a successful enable" \
+  env ANGIE_ETC="$ROOT" ANGIE_RELOAD_CMD="$ROOT/bin/reloadcmd" "$CTL" --no-test --reload httpconf en drupal
+assert_exists "reload command was invoked" "$ROOT/reloaded"
+
+setup_tree
+make_reload_stub
+env ANGIE_ETC="$ROOT" "$CTL" --no-test httpconf en drupal >/dev/null 2>&1
+env ANGIE_ETC="$ROOT" ANGIE_RELOAD_CMD="$ROOT/bin/reloadcmd" "$CTL" --no-test --reload httpconf en drupal >/dev/null 2>&1
+assert_absent "reload is skipped when nothing changed" "$ROOT/reloaded"
+
+setup_tree
+make_reload_stub
+assert_contains "dry-run reload only announces" "would reload" \
+  env ANGIE_ETC="$ROOT" ANGIE_RELOAD_CMD="$ROOT/bin/reloadcmd" "$CTL" --dry-run --reload httpconf en drupal
+assert_absent "dry-run reload does not run the command" "$ROOT/reloaded"
+
+setup_tree
+make_stub 1
+make_reload_stub
+assert_status 1 "failing config test prevents reload" \
+  env ANGIE_ETC="$ROOT" ANGIE_BIN="$ROOT/bin/angie" ANGIE_RELOAD_CMD="$ROOT/bin/reloadcmd" "$CTL" --reload httpconf en drupal
+assert_absent "reload is skipped when the config test fails" "$ROOT/reloaded"
+
+# --- rollback (--rollback) -----------------------------------------------
+
+setup_tree
+assert_status 1 "--rollback with --no-test is rejected" ctl_raw --rollback --no-test httpconf en drupal
+
+setup_tree
+make_stub 1
+assert_status 1 "rollback enable exits non-zero on a failed test" \
+  env ANGIE_ETC="$ROOT" ANGIE_BIN="$ROOT/bin/angie" "$CTL" --rollback httpconf en drupal
+assert_absent "rollback removes the symlink it created" "$ROOT/http-conf.d/drupal.conf"
+
+setup_tree
+make_stub 1
+env ANGIE_ETC="$ROOT" "$CTL" --no-test httpconf en drupal >/dev/null 2>&1
+assert_status 1 "rollback disable exits non-zero on a failed test" \
+  env ANGIE_ETC="$ROOT" ANGIE_BIN="$ROOT/bin/angie" "$CTL" --rollback httpconf dis drupal
+assert_exists "rollback recreates the disabled symlink" "$ROOT/http-conf.d/drupal.conf"
+
 # --- summary -------------------------------------------------------------
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

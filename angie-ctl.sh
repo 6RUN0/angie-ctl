@@ -32,29 +32,51 @@ esac
 # Binary used for the post-change configuration test (see run_config_test).
 : "${ANGIE_BIN:=angie}"
 
+# Command run by --reload after a successful en/dis/prune batch. A plain
+# command line (word-split on whitespace), executed under the same fixed PATH
+# as the config test. Override to integrate with a service manager, e.g.
+# ANGIE_RELOAD_CMD='systemctl reload angie'.
+: "${ANGIE_RELOAD_CMD:=$ANGIE_BIN -s reload}"
+
+# A trusted PATH for the config test and reload, so an inherited/hostile PATH
+# cannot redirect $ANGIE_BIN / the reload command to an attacker binary (both
+# run as root in the normal deployment). Absolute commands bypass the lookup.
+SAFE_PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
 print_usage() {
   cat <<EOF
 Usage:
-  $0 [-n|--dry-run] [-T|--no-test] {httpconf|mod} {en|dis|ls|ls-available|ls-enabled} [name ...]
+  $0 [options] {httpconf|mod} {en|dis|ls|ls-available|ls-enabled|status|prune} [name ...]
+
+Commands:
+  en, dis         enable/disable named configs (creates/removes symlinks)
+  status          print on/off per name; exit 0 only if all are enabled
+  prune           remove every orphaned enabled symlink (no source available)
+  ls              list available with [on ]/[off]/[orphan] markers
+  ls-available, ls-enabled  list one directory
 
 Options (must be given separately; -nT is not split into -n -T):
-  -n, --dry-run   show what en/dis would change, without modifying anything
+  -n, --dry-run   show what en/dis/prune would change, without modifying anything
   -T, --no-test   skip the '$ANGIE_BIN -t' config test that otherwise runs
-                  once after a successful en/dis batch
+                  once after a successful en/dis/prune batch
+  -r, --reload    reload Angie ('\$ANGIE_RELOAD_CMD') after a successful batch
+  --rollback      if the post-batch config test fails, undo this run's changes
+                  (cannot be combined with --no-test)
   -h, --help, help  show this help and exit
 
 Environment:
-  ANGIE_ETC   config root (default /etc/angie; must be absolute)
-  ANGIE_BIN   binary for the config test (default angie)
+  ANGIE_ETC         config root (default /etc/angie; must be absolute)
+  ANGIE_BIN         binary for the config test (default angie)
+  ANGIE_RELOAD_CMD  reload command for --reload (default '\$ANGIE_BIN -s reload')
 
 Examples:
   $0 httpconf en drupal # resolves drupal or drupal.conf
   $0 httpconf en drupal.conf
-  $0 httpconf dis drupal
-  $0 mod en geoip
-  $0 mod dis geoip
+  $0 --reload httpconf dis drupal
+  $0 --rollback mod en geoip
+  $0 httpconf status drupal
+  $0 httpconf prune
   $0 httpconf ls
-  $0 mod ls
 EOF
 }
 
@@ -68,6 +90,8 @@ usage() {
 # arguments so help is always reachable with a success status.
 DRY_RUN=0
 NO_TEST=0
+RELOAD=0
+ROLLBACK=0
 while [ $# -gt 0 ]; do
   case "$1" in
   -h | --help | help)
@@ -80,6 +104,14 @@ while [ $# -gt 0 ]; do
     ;;
   -T | --no-test)
     NO_TEST=1
+    shift
+    ;;
+  -r | --reload)
+    RELOAD=1
+    shift
+    ;;
+  --rollback)
+    ROLLBACK=1
     shift
     ;;
   --)
@@ -95,6 +127,14 @@ while [ $# -gt 0 ]; do
     ;;
   esac
 done
+
+# Rollback is triggered by a failing config test, so it is meaningless without
+# one. Reject the contradictory combination up front rather than silently
+# ignoring --rollback.
+if [ "$ROLLBACK" -eq 1 ] && [ "$NO_TEST" -eq 1 ]; then
+  echo "--rollback cannot be combined with --no-test" >&2
+  usage
+fi
 
 [ $# -ge 2 ] || usage
 
@@ -169,6 +209,68 @@ run_config_test() {
   return 1
 }
 
+# Reload Angie once, AFTER a batch is applied and the config test passed.
+# Skipped unless --reload was given and at least one change was applied.
+# Argument: number of changes actually applied in this run.
+run_reload() {
+  changes=$1
+  [ "$RELOAD" -eq 1 ] || return 0
+  [ "$changes" -gt 0 ] || return 0
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] would reload: $ANGIE_RELOAD_CMD"
+    return 0
+  fi
+  # ANGIE_RELOAD_CMD is a trusted command line; intentional word splitting.
+  # shellcheck disable=SC2086
+  if PATH="$SAFE_PATH" $ANGIE_RELOAD_CMD; then
+    return 0
+  fi
+  echo "Reload failed ('$ANGIE_RELOAD_CMD')" >&2
+  return 1
+}
+
+# Undo this run's changes when --rollback is set and the config test failed.
+# UNDO_KIND selects the inverse operation; UNDO_LIST is the newline-separated
+# record built by the mutating function (this assumes config names contain no
+# newline, which is always true for real Angie configs and is upheld upstream
+# by is_safe_name rejecting path separators):
+#   created -> one ENABLED_DIR symlink path per line; inverse is rm
+#   removed -> "<symlink path>\t<link target>" per line; inverse is ln -s
+UNDO_KIND=""
+UNDO_LIST=""
+do_rollback() {
+  case "$UNDO_KIND" in
+  created)
+    printf '%s' "$UNDO_LIST" | while IFS= read -r link; do
+      [ -n "$link" ] || continue
+      rm -f "$link" && echo "Rolled back enable: ${link##*/}" >&2
+    done
+    ;;
+  removed)
+    printf '%s' "$UNDO_LIST" | while IFS=$(printf '\t') read -r link target; do
+      [ -n "$link" ] || continue
+      ln -s "$target" "$link" && echo "Rolled back disable: ${link##*/}" >&2
+    done
+    ;;
+  esac
+}
+
+# Shared batch tail for the mutating commands: validate once, then either
+# reload (on success) or roll back (on failure, if requested). Returns the
+# status the caller should fold into its own rc.
+finalize_batch() {
+  changes=$1
+  if run_config_test "$changes"; then
+    run_reload "$changes" || return 1
+    return 0
+  fi
+  if [ "$ROLLBACK" -eq 1 ] && [ "$changes" -gt 0 ]; then
+    do_rollback
+    echo "Rolled back $changes change(s); config restored to its prior state" >&2
+  fi
+  return 1
+}
+
 # A name must be a single path component: reject empty, '.', '..' and anything
 # containing a slash so it cannot escape the managed directories.
 is_safe_name() {
@@ -223,6 +325,8 @@ do_enable() {
   subdir=${AVAILABLE_DIR##*/}
   rc=0
   changed=0
+  UNDO_KIND=created
+  UNDO_LIST=""
 
   for base in "$@"; do
     if ! is_safe_name "$base"; then
@@ -248,19 +352,25 @@ do_enable() {
 
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "[dry-run] would enable $KIND: $name"
+      # Count intended changes so a dry-run preview can also show the reload
+      # step; the config test stays skipped (run_config_test guards DRY_RUN).
+      changed=$((changed + 1))
       continue
     fi
 
     if ln -s "../$subdir/$name" "$dst"; then
       echo "Enabled $KIND: $name"
       changed=$((changed + 1))
+      UNDO_LIST="$UNDO_LIST$dst
+"
     else
       rc=1
     fi
   done
 
-  # Validate once, after the whole batch, not per item (see run_config_test).
-  run_config_test "$changed" || rc=1
+  # Validate once, after the whole batch, not per item (see run_config_test),
+  # then reload or roll back as requested.
+  finalize_batch "$changed" || rc=1
 
   [ $rc -eq 0 ] || exit $rc
 }
@@ -275,6 +385,8 @@ do_disable() {
 
   rc=0
   changed=0
+  UNDO_KIND=removed
+  UNDO_LIST=""
   for base in "$@"; do
     if ! is_safe_name "$base"; then
       echo "Invalid name: '$base'" >&2
@@ -300,20 +412,25 @@ do_disable() {
 
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "[dry-run] would disable $KIND: $name"
+      changed=$((changed + 1))
       continue
     fi
 
+    # Capture the link target before removal so --rollback can recreate it.
+    link_target=$(readlink "$dst")
     if rm -f "$dst"; then
       echo "Disabled $KIND: $name"
       changed=$((changed + 1))
+      UNDO_LIST="$UNDO_LIST$dst$(printf '\t')$link_target
+"
     else
       rc=1
     fi
   done
 
   # Disabling can also break config (a module a config still needs); validate
-  # once after the batch, same policy as enable.
-  run_config_test "$changed" || rc=1
+  # once after the batch, same policy as enable, then reload/roll back.
+  finalize_batch "$changed" || rc=1
 
   [ $rc -eq 0 ] || exit $rc
 }
@@ -358,9 +475,96 @@ do_list() {
   done
 }
 
+# Report on/off per name. Exit status is 0 only when every queried name is
+# enabled, so callers can gate on it: `angie-ctl mod status geoip && ...`.
+do_status() {
+  ensure_dirs
+  [ $# -ge 1 ] || {
+    echo "Nothing to query" >&2
+    exit 1
+  }
+
+  rc=0
+  for base in "$@"; do
+    if ! is_safe_name "$base"; then
+      echo "Invalid name: '$base'" >&2
+      rc=1
+      continue
+    fi
+
+    if name=$(resolve_name_enabled "$base"); then
+      printf '[on ] %s\n' "$name"
+    else
+      # Fall back to the available name for nicer output when present.
+      name=$(resolve_name_available "$base") || name=$base
+      printf '[off] %s\n' "$name"
+      rc=1
+    fi
+  done
+
+  exit $rc
+}
+
+# Remove every orphaned enabled symlink (active in Angie but with no source in
+# AVAILABLE_DIR, i.e. the [orphan] entries from `ls`). Only symlinks are
+# touched, same guard as do_disable. Goes through the shared batch tail so it
+# honors --dry-run/--no-test/--reload/--rollback like en/dis.
+do_prune() {
+  ensure_dirs
+  [ "$DRY_RUN" -eq 1 ] || require_writable_enabled
+
+  rc=0
+  changed=0
+  UNDO_KIND=removed
+  UNDO_LIST=""
+  for f in "$ENABLED_DIR"/*; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    name=${f##*/}
+
+    # Skip entries that still have a source: those are managed, not orphaned.
+    if [ -e "$AVAILABLE_DIR/$name" ] || [ -L "$AVAILABLE_DIR/$name" ]; then
+      continue
+    fi
+
+    dst="$ENABLED_DIR/$name"
+    if [ ! -L "$dst" ]; then
+      echo "$KIND '$name' is orphaned but not a symlink, skipping" >&2
+      continue
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would prune $KIND: $name"
+      changed=$((changed + 1))
+      continue
+    fi
+
+    link_target=$(readlink "$dst")
+    if rm -f "$dst"; then
+      echo "Pruned $KIND: $name"
+      changed=$((changed + 1))
+      UNDO_LIST="$UNDO_LIST$dst$(printf '\t')$link_target
+"
+    else
+      rc=1
+    fi
+  done
+
+  finalize_batch "$changed" || rc=1
+
+  [ $rc -eq 0 ] || exit $rc
+}
+
 case "$CMD" in
 enable | en) do_enable "$@" ;;
 disable | dis) do_disable "$@" ;;
+status | stat) do_status "$@" ;;
+prune)
+  [ $# -eq 0 ] || {
+    echo "prune takes no names (it removes all orphans)" >&2
+    usage
+  }
+  do_prune
+  ;;
 list | ls) do_list ;;
 "ls-available" | "list-available") do_list_available ;;
 "ls-enabled" | "list-enabled") do_list_enabled ;;

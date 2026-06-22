@@ -51,6 +51,8 @@ printf 'server { listen 8080; server_name ok.test; }\n' \
   > "$ETC/http-conf-available.d/ok.conf"
 printf 'server { not_a_real_directive on; }\n' \
   > "$ETC/http-conf-available.d/broken.conf"
+printf 'server { also_not_a_directive on; }\n' \
+  > "$ETC/http-conf-available.d/rollme.conf"
 
 fail=0
 check() { # desc want -- command...
@@ -75,12 +77,23 @@ absent() {
 }
 
 check   "baseline real angie -t passes"                 0 angie -t
+check   "status reports a disabled config off"          1 angie-ctl httpconf status ok
 check   "enable valid config passes real angie -t"      0 angie-ctl httpconf en ok
 present "valid config symlinked"                          "$ETC/http-conf.d/ok.conf"
+check   "status reports an enabled config on"           0 angie-ctl httpconf status ok
 check   "enable broken config fails real angie -t"      1 angie-ctl httpconf en broken
 present "broken config kept after failed test"            "$ETC/http-conf.d/broken.conf"
+check   "--rollback undoes a change on failed test"     1 angie-ctl --rollback httpconf en rollme
+absent  "rolled-back config left no symlink"             "$ETC/http-conf.d/rollme.conf"
 check   "--no-test bypasses the real angie -t"          0 angie-ctl --no-test httpconf dis broken
 absent  "broken config disabled via --no-test"           "$ETC/http-conf.d/broken.conf"
+
+# Orphan an enabled config (drop its source), then prune it; real angie -t
+# must still pass once the dangling include is gone.
+ln -s ../http-conf-available.d/gone.conf "$ETC/http-conf.d/gone.conf"
+check   "prune removes the orphan and config stays valid" 0 angie-ctl httpconf prune
+absent  "orphan removed by prune"                        "$ETC/http-conf.d/gone.conf"
+
 check   "disable leaves a valid configuration"          0 angie-ctl httpconf dis ok
 
 echo
