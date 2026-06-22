@@ -1,0 +1,6 @@
+# rumdl configuration for angie-ctl docs.
+# MD013 (line length) is intentionally disabled: prose wrapping is not enforced
+# in this repo and the editorconfig sets no maximum line length.
+
+[global]
+disable = ["MD013"]

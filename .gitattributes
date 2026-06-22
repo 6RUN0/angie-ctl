@@ -1,0 +1,12 @@
+# Normalize line endings: every text file is stored and checked out as LF.
+# This is a POSIX-sh project — CRLF would break the `#!/bin/sh` shebang and
+# the tab-sensitive Makefile on a Windows checkout. Complements .editorconfig.
+* text=auto eol=lf
+
+# Be explicit for the files that must never carry CRLF.
+*.sh           text eol=lf
+*.md           text eol=lf
+*.toml         text eol=lf
+Makefile       text eol=lf
+.editorconfig  text eol=lf
+.gitattributes text eol=lf
