@@ -43,7 +43,11 @@ Environment:
   run a binary outside those locations. Treat `ANGIE_BIN`/`PATH` as trust-sensitive
   if the tool is wrapped by sudo or CI.
 - `ANGIE_RELOAD_CMD` — reload command for `--reload` (default `$ANGIE_BIN -s reload`),
-  run under the same fixed `PATH`
+  run under the same fixed `PATH`. The value is executed as a command line (word-split
+  on whitespace) with the privileges of the process, so it must come only from a trusted
+  operator — set it yourself, do not pass it through from a less-trusted caller. When the
+  tool is wrapped by sudo, drop it from the inherited environment (e.g. `env_keep`/`env_delete`)
+  rather than letting the caller supply it.
 
 ### Examples
 

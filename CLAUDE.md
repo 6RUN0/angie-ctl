@@ -90,11 +90,20 @@ broken before the run must not block every future operation. `--rollback` opts
 into undoing exactly this run's changes instead (`do_rollback`: `rm` for the
 symlinks `do_enable` created, `ln -s` from the captured `readlink` target for
 those `do_disable`/`do_prune` removed). The undo log is the newline-separated
-`UNDO_LIST`; this assumes config names contain no newline, which holds for real
-Angie configs and is the reason names stay single path components. `--reload`
+`UNDO_LIST` (tab-separated fields for the `removed` kind); names can contain
+neither newline nor tab, which `is_safe_name` now enforces alongside rejecting
+path separators, so the log can never be corrupted. `do_rollback` reads it from
+a here-document (not a pipe) so it runs in the current shell and returns
+non-zero if any undo step failed (`finalize_batch` reports an incomplete
+rollback). An empty captured `readlink` target is omitted from the log with a
+warning rather than recorded as an un-recreatable entry. `--reload`
 runs `ANGIE_RELOAD_CMD` (default `$ANGIE_BIN -s reload`) under `SAFE_PATH` after
 a successful batch; a failed test prevents the reload, and a rollback never
-reloads (state is already back to the prior, loaded config). In `--dry-run`,
+reloads (state is already back to the prior, loaded config). Note `SAFE_PATH`
+only protects the *lookup* of the command's first word — `ANGIE_RELOAD_CMD` is
+executed as a word-split command line with the process's privileges, so it is a
+trusted input that must be set by the operator, never forwarded from a
+less-trusted caller (drop it via sudo `env_delete` when wrapping). In `--dry-run`,
 the mutating commands count intended changes so the preview can show the reload
 step, while `run_config_test` still no-ops on the dry-run guard.
 
