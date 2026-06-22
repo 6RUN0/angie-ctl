@@ -9,8 +9,11 @@ A Russian translation of this file is maintained at [CHANGELOG.ru.md](CHANGELOG.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-22
+
 ### Added
 
+- `-V`/`--version` option: print the tool version and exit.
 - `status` command: report `[on ]`/`[off]` per name, exiting `0` only when every
   queried name is enabled, so callers can gate on it.
 - `prune` command: remove every orphaned enabled symlink (active but with no source
@@ -61,4 +64,5 @@ A Russian translation of this file is maintained at [CHANGELOG.ru.md](CHANGELOG.
   and not forwarded from a less-trusted caller (drop it via sudo `env_delete` when
   wrapping). `SAFE_PATH` only protects the lookup of the command's first word.
 
-[Unreleased]: https://github.com/6RUN0/angie-ctl/commits/main
+[Unreleased]: https://github.com/6RUN0/angie-ctl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/6RUN0/angie-ctl/releases/tag/v0.1.0

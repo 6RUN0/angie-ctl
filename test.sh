@@ -151,6 +151,8 @@ assert_contains "help mentions dry-run option" "--dry-run" ctl_raw --help
 assert_contains "help mentions no-test option" "--no-test" ctl_raw --help
 assert_status 1 "unknown option is rejected" ctl --bogus httpconf ls
 assert_status 1 "missing command shows usage" ctl httpconf
+assert_status 0 "--version exits 0 with no other args" ctl_raw --version
+assert_contains "version output names the tool" "angie-ctl " ctl_raw -V
 
 # --- ANGIE_ETC validation ------------------------------------------------
 

@@ -15,7 +15,7 @@ INSTALL ?= install
 
 # Inputs.
 SCRIPTS  := angie-ctl.sh test.sh test-container.sh
-MARKDOWN := README.md README.ru.md
+MARKDOWN := README.md README.ru.md CHANGELOG.md CHANGELOG.ru.md
 BIN_NAME := angie-ctl
 
 .DEFAULT_GOAL := help

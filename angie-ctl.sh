@@ -7,6 +7,10 @@
 
 set -u
 
+# Single source of truth for the version. The release workflow asserts that a
+# pushed tag 'vX.Y.Z' matches this value, so bump it together with the tag.
+VERSION=0.1.0
+
 : "${ANGIE_ETC:=/etc/angie}"
 
 # ANGIE_ETC is interpolated into every path; require an absolute base so a
@@ -70,6 +74,7 @@ Options (must be given separately; -nT is not split into -n -T):
   -r, --reload    reload Angie ('\$ANGIE_RELOAD_CMD') after a successful batch
   --rollback      if the post-batch config test fails, undo this run's changes
                   (cannot be combined with --no-test)
+  -V, --version   show the version and exit
   -h, --help, help  show this help and exit
 
 Environment:
@@ -104,6 +109,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
   -h | --help | help)
     print_usage
+    exit 0
+    ;;
+  -V | --version)
+    echo "angie-ctl $VERSION"
     exit 0
     ;;
   -n | --dry-run)

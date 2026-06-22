@@ -109,8 +109,8 @@ step, while `run_config_test` still no-ops on the dry-run guard.
 
 History note: commit `4cc3903 "remove config test"` had earlier removed an
 `angie -t` step; it was reintroduced with the batch-once semantics above. Keep
-the two READMEs in sync (`README.ru.md` is the Russian translation of
-`README.md`).
+each English doc and its Russian sibling in sync: `README.ru.md` translates
+`README.md`, and `CHANGELOG.ru.md` translates `CHANGELOG.md`.
 
 ## Commands
 
@@ -133,6 +133,23 @@ non-blocking (`continue-on-error`) `container` job that pulls the Angie image
 and runs `make test-container`. Keep it clean under `actionlint` and `zizmor`
 (actions pinned to a commit SHA, `persist-credentials: false`, `permissions:
 contents: read`).
+
+## Releases
+
+Versioning is SemVer; the version lives in one place, `VERSION` near the top of
+`angie-ctl.sh` (exposed via `-V`/`--version`). `CHANGELOG.md` (and its Russian
+sibling `CHANGELOG.ru.md`) follow Keep a Changelog: unreleased work accrues
+under `[Unreleased]`, and cutting a release moves it to a new `[X.Y.Z] - DATE`
+section with the compare/tag links updated at the bottom.
+
+Releasing is tag-driven. Bump `VERSION`, cut the changelog section, commit, then
+push an annotated tag `vX.Y.Z`. That triggers `.github/workflows/release.yml`,
+which runs `make check`, asserts the tag matches `VERSION` (refusing a
+mismatch), extracts the matching `CHANGELOG.md` section as release notes, and
+publishes a GitHub release with `angie-ctl.sh` attached. The release job is the
+only place granted `contents: write`; keep it clean under `actionlint`/`zizmor`
+(SHA-pinned actions, the tag read from the `$GITHUB_REF_NAME` env var rather
+than `${{ }}` interpolation).
 
 ## Testing
 

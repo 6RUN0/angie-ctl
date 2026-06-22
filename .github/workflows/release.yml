@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    # Only this job needs write access, to create the GitHub release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run the CI gate (shellcheck + hermetic suite)
+        run: make check
+      - name: Verify the script version matches the tag
+        run: |
+          want=${GITHUB_REF_NAME#v}
+          have=$(sed -n 's/^VERSION=//p' angie-ctl.sh)
+          if [ "$want" != "$have" ]; then
+            echo "Tag '$GITHUB_REF_NAME' does not match script VERSION='$have'" >&2
+            exit 1
+          fi
+      - name: Extract the changelog section for this version
+        run: |
+          ver=${GITHUB_REF_NAME#v}
+          # Print the body of "## [VER]" up to the next section heading or the
+          # link-reference definitions at the foot of the file.
+          awk -v ver="$ver" '
+            index($0, "## [" ver "]") == 1 { grab = 1; next }
+            grab && (/^## \[/ || /^\[[^]]*\]: /) { exit }
+            grab { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No changelog section found for '$ver' in CHANGELOG.md" >&2
+            exit 1
+          fi
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag \
+            angie-ctl.sh

@@ -33,6 +33,7 @@ Options (give each separately; `-nT` is not split into `-n -T`):
 - `-r`, `--reload` — reload Angie (`$ANGIE_RELOAD_CMD`) after a successful batch
 - `--rollback` — if the post-batch config test fails, undo this run's changes
   (cannot be combined with `--no-test`)
+- `-V`, `--version` — show the version and exit
 - `-h`, `--help`, `help` — show help and exit
 
 Environment:
